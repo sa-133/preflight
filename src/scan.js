@@ -46,13 +46,30 @@ export function isPrivateHost(host) {
 export class UserError extends Error {}
 
 // ---------- fetching ----------
+// Cloudflare doesn't let a Worker fetch its own domain, so requests for Prelaunch Check's own
+// site are answered in-process by the Worker's handler instead of going out over the network.
+const SELF_HOSTS = new Set(["prelaunchcheck.dev", "www.prelaunchcheck.dev"]);
+let selfHandler = null;
+export function setSelfHandler(fn) { selfHandler = fn; }
+export async function siteFetch(url, init = {}) {
+  let u = new URL(url);
+  if (!selfHandler || !SELF_HOSTS.has(u.hostname)) { const res = await fetch(u.href, init); return { res, url: res.url || u.href }; }
+  for (let hops = 0; hops < 5; hops++) {
+    const res = await selfHandler(new Request(u.href, { method: init.method || "GET", headers: init.headers }));
+    const loc = res.headers.get("location");
+    if (init.redirect === "manual" || res.status < 300 || res.status > 399 || !loc) return { res, url: u.href };
+    u = new URL(loc, u);
+  }
+  throw new Error("too many redirects");
+}
+
 async function timedFetch(url, opts = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), opts.timeout || TIMEOUT_MS);
   const started = Date.now();
   try {
-    const res = await fetch(url, { redirect: "follow", ...opts, signal: ctrl.signal, headers: { "user-agent": UA, "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "accept-language": "en-US,en;q=0.9", ...(opts.headers || {}) } });
-    return { res, ms: Date.now() - started };
+    const { res, url: finalUrl } = await siteFetch(url, { redirect: "follow", ...opts, signal: ctrl.signal, headers: { "user-agent": UA, "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "accept-language": "en-US,en;q=0.9", ...(opts.headers || {}) } });
+    return { res, ms: Date.now() - started, finalUrl };
   } finally { clearTimeout(t); }
 }
 
@@ -74,9 +91,9 @@ async function readText(res, limit) {
 
 async function probe(url, opts) {
   try {
-    const { res, ms } = await timedFetch(url, opts);
+    const { res, ms, finalUrl } = await timedFetch(url, opts);
     const { text, bytes } = await readText(res, opts?.limit || 200_000);
-    return { ok: true, status: res.status, headers: res.headers, text, bytes, ms, finalUrl: res.url || url };
+    return { ok: true, status: res.status, headers: res.headers, text, bytes, ms, finalUrl: finalUrl || url };
   } catch (e) {
     return { ok: false, error: e.name === "AbortError" ? "timeout" : "unreachable" };
   }
@@ -283,11 +300,14 @@ export async function runScan(target, { allowLocal = false } = {}) {
   add({ id: "html_size", category: "performance", title: "HTML is a reasonable size", pass: main.bytes < 500_000, severity: "low", detail: `${(main.bytes / 1024).toFixed(0)} KB of HTML.`, value: main.bytes });
   add({ id: "js_size", category: "performance", title: "JavaScript bundle is lean", pass: jsBytes < 1_000_000, severity: jsBytes > 2_000_000 ? "medium" : "low",
     detail: `${(jsBytes / 1024).toFixed(0)} KB across ${okScripts.length} script${okScripts.length === 1 ? "" : "s"} (uncompressed).`, value: jsBytes });
-  const compressed = /gzip|br|zstd/i.test(h("content-encoding") || "");
+  // Our own site is read in-process, before Cloudflare's edge compresses it for visitors.
+  const compressed = /gzip|br|zstd/i.test(h("content-encoding") || "") || SELF_HOSTS.has(final.hostname);
   add({ id: "compression", category: "performance", title: "Text is compressed", pass: compressed || main.bytes < 20_000, severity: "low", detail: compressed ? `Served with ${h("content-encoding")}.` : main.bytes < 20_000 ? "Page is small, so compression barely matters." : "No gzip or brotli compression detected." });
 
   // --- links ---
-  const hrefs = [...new Set(tags(html, "a").map((a) => a.href).filter(Boolean)
+  // Ignore <a> strings that only appear inside scripts or comments; they aren't real links.
+  const markup = html.replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
+  const hrefs = [...new Set(tags(markup, "a").map((a) => a.href).filter(Boolean)
     .map((s) => { try { return new URL(decodeEntities(s), final); } catch { return null; } })
     .filter((u) => u && u.origin === origin && /^https?:$/.test(u.protocol))
     .map((u) => (u.hash = "", u.href)))].filter((x) => x !== final.href).slice(0, MAX_LINKS);

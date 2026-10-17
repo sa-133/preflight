@@ -1,4 +1,4 @@
-import { runScan, UserError, scoreChecks, grade, normalizeUrl } from "./scan.js";
+import { runScan, UserError, scoreChecks, grade, normalizeUrl, setSelfHandler, siteFetch } from "./scan.js";
 import { fixFor } from "./fixes.js";
 import { PAGE } from "./page.js";
 import { legalPage, CONTACT } from "./legal.js";
@@ -30,8 +30,9 @@ const SECURITY_HEADERS = {
   "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'; form-action 'self' https://buy.stripe.com",
 };
 
-export default {
+const worker = {
   async fetch(request, env) {
+    setSelfHandler((req) => worker.fetch(req, env));
     const url = new URL(request.url);
     const p = url.pathname;
     if (url.hostname === "www.prelaunchcheck.dev") return Response.redirect("https://prelaunchcheck.dev" + p + url.search, 301);
@@ -108,6 +109,7 @@ export default {
     }
   },
 };
+export default worker;
 
 async function load(env, id) { return env.SCANS.get("scan:" + id, "json"); }
 async function save(env, id, rec) { return env.SCANS.put("scan:" + id, JSON.stringify(rec), { expirationTtl: TTL }); }
@@ -158,18 +160,18 @@ async function handleVerify(env, id) {
   // unlocks scanning its subdomains. "page" = a tag on some inner page: this report only.
   let via = null;
   try {
-    const r = await fetch(origin + "/.well-known/prelaunch-verify.txt", { redirect: "follow" });
-    if (r.ok && sameOrigin(r, origin) && (await r.text()).includes(tok)) via = "domain";
+    const { res: r, url: at } = await siteFetch(origin + "/.well-known/prelaunch-verify.txt", { redirect: "follow" });
+    if (r.ok && new URL(at).origin === origin && (await r.text()).includes(tok)) via = "domain";
   } catch {}
   if (!via) {
     try {
-      const r = await fetch(origin + "/", { redirect: "follow" });
-      if (r.ok && sameOrigin(r, origin) && re.test(await r.text())) via = "domain";
+      const { res: r, url: at } = await siteFetch(origin + "/", { redirect: "follow" });
+      if (r.ok && new URL(at).origin === origin && re.test(await r.text())) via = "domain";
     } catch {}
   }
   if (!via && new URL(rec.result.url).pathname !== "/") {
     try {
-      const r = await fetch(rec.result.url, { redirect: "follow" });
+      const { res: r } = await siteFetch(rec.result.url, { redirect: "follow" });
       if (re.test(await r.text())) via = "page";
     } catch {}
   }
@@ -241,7 +243,6 @@ function subRoot(rec) {
   if (!rec.verified || rec.verifiedVia !== "domain" || rec.parent) return null;
   return new URL(rec.result.url).hostname.toLowerCase().replace(/^www\./, "");
 }
-function sameOrigin(res, origin) { try { return !res.url || new URL(res.url).origin === origin; } catch { return false; } }
 function inScope(host, root) { return host === root || host.endsWith("." + root); }
 const HOST_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/;
 
