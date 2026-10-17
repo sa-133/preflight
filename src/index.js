@@ -75,6 +75,8 @@ const worker = {
       if (request.method === "GET" && ["/terms", "/privacy", "/refunds"].includes(p)) {
         return html(legalPage(p.slice(1)));
       }
+      // Owner verification for our own site (codes listed in SELF_VERIFY in wrangler.toml).
+      if (p === "/.well-known/prelaunch-verify.txt") return new Response((env.SELF_VERIFY || "").split(",").map((t) => t.trim()).filter(Boolean).join("\n") + "\n", { headers: { "content-type": "text/plain" } });
       if (p === "/robots.txt") return new Response(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${url.origin}/sitemap.xml\n`, { headers: { "content-type": "text/plain" } });
       if (p === "/sitemap.xml") return new Response(sitemapXml(), { headers: { "content-type": "application/xml" } });
 
