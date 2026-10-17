@@ -95,12 +95,14 @@ function tags(html, name) {
 }
 function metaContent(html, key) {
   for (const a of tags(html, "meta")) {
-    if ((a.name || a.property || "").toLowerCase() === key) return (a.content || "").trim();
+    if ((a.name || a.property || "").toLowerCase() === key) return decodeEntities((a.content || "").trim());
   }
   return null;
 }
 function decodeEntities(s) {
-  return s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  return s.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
 }
 
 // ---------- secret detection ----------
