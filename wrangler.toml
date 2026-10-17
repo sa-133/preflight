@@ -1,6 +1,17 @@
 name = "preflight"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
+# Serve on the custom domain (Cloudflare creates the DNS record and certificate on deploy)
+routes = [
+  { pattern = "prelaunchcheck.dev", custom_domain = true },
+  { pattern = "www.prelaunchcheck.dev", custom_domain = true }
+]
+
+
+[[rules]]
+type = "Data"
+globs = ["**/*.png"]
+fallthrough = true
 
 # Create with: npx wrangler kv namespace create SCANS  (or in the Cloudflare dashboard)
 [[kv_namespaces]]

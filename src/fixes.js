@@ -8,7 +8,7 @@ export const FIXES = {
       "Revoke (rotate) every listed key in that provider's dashboard right now. Deleting it from your code is not enough, because it is already public.",
       "Move the API call to a server: an API route, serverless function or edge function. Call your own endpoint from the browser instead.",
       "Keep the new key in a server-only environment variable and never import it into client code.",
-      "Redeploy, then run Preflight again to confirm the keys are gone.",
+      "Redeploy, then run Prelaunch Check again to confirm the keys are gone.",
     ],
     stack: {
       "Next.js": "Only variables starting with NEXT_PUBLIC_ reach the browser. Rename the secret without that prefix and use it only inside app/api routes or server components.",

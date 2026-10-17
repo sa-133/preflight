@@ -1,7 +1,7 @@
-// Preflight scan engine. Passive checks only: it requests the page, its own
+// Prelaunch Check scan engine. Passive checks only: it requests the page, its own
 // same-origin scripts, a few well-known paths and a sample of internal links.
 
-const UA = "PreflightBot/1.0 (+site launch checker)";
+const UA = "PrelaunchCheckBot/1.0 (+site launch checker)";
 const MAX_SCRIPTS = 8;
 const MAX_SCRIPT_BYTES = 2_500_000;
 const MAX_LINKS = 15;
@@ -116,6 +116,7 @@ const SECRET_PATTERNS = [
   { id: "groq", name: "Groq API key", re: /\bgsk_[A-Za-z0-9]{40,}/g, severity: "critical" },
   { id: "xai", name: "xAI API key", re: /\bxai-[A-Za-z0-9]{40,}/g, severity: "critical" },
   { id: "replicate", name: "Replicate API token", re: /\br8_[A-Za-z0-9]{30,}/g, severity: "critical" },
+  { id: "supabase_secret", name: "Supabase secret key", re: /\bsb_secret_[A-Za-z0-9_-]{20,}/g, severity: "critical" },
   { id: "private_key", name: "Private key", re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g, severity: "critical" },
   { id: "google", name: "Google API key", re: /\bAIza[0-9A-Za-z_-]{35}\b/g, severity: "info" },
 ];

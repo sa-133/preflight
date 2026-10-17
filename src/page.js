@@ -3,12 +3,14 @@ export const PAGE = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Preflight: check your site before you ship</title>
+<title>Prelaunch Check: test your site before you launch</title>
 <meta name="description" content="Paste your site's address and get a launch checklist in seconds: leaked API keys, missing meta tags, broken links, security headers and bundle size. Built for vibe coders.">
-<link rel="canonical" href="/">
-<meta property="og:title" content="Preflight: check your site before you ship">
+<link rel="canonical" href="https://prelaunchcheck.dev/">
+<meta property="og:url" content="https://prelaunchcheck.dev/">
+<meta property="og:image" content="https://prelaunchcheck.dev/og.png">
+<meta property="og:title" content="Prelaunch Check: test your site before you launch">
 <meta property="og:description" content="Leaked API keys, missing meta tags, broken links and slow bundles, caught in one scan.">
-<meta name="twitter:card" content="summary">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23E8590C'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -79,19 +81,19 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
 <body>
 <div class="wrap">
   <header style="display:flex;flex-direction:column;gap:18px">
-    <div class="brand"><i></i>Preflight</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div class="brand"><i></i>Prelaunch Check</div><a href="/guides" style="font-size:15px">Launch guides</a></div>
     <h1>Check your site <em>before</em> you ship it.</h1>
     <p class="lede">Built something with AI? Paste the address and get a launch checklist in about ten seconds: leaked API keys, missing link previews, broken links, security headers and bundle size.</p>
     <form id="scanForm">
       <label for="urlInput" class="meta" style="flex-basis:100%">Your site's address</label>
       <input id="urlInput" type="text" inputmode="url" autocomplete="url" placeholder="myapp.vercel.app" required>
-      <button id="scanBtn" class="primary" type="submit">Run preflight</button>
+      <button id="scanBtn" class="primary" type="submit">Run the check</button>
     </form>
     <ul class="covers"><li>Leaked keys</li><li>Exposed .env</li><li>Link previews</li><li>SEO basics</li><li>Security headers</li><li>Broken links</li><li>Bundle size</li></ul>
     <p id="error" class="err" hidden></p>
   </header>
   <main id="report" aria-live="polite"></main>
-  <footer>Preflight only reads what any visitor's browser can see. Leaked-key details are shown only to the site's verified owner, and we never charge to tell you a key is exposed.<br>Questions or refunds: __CONTACT__ · <a href="/refunds">Refunds</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></footer>
+  <footer>Prelaunch Check only reads what any visitor's browser can see. Leaked-key details are shown only to the site's verified owner, and we never charge to tell you a key is exposed.<br>Questions or refunds: __CONTACT__ · <a href="/refunds">Refunds</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></footer>
 </div>
 <script>
 (function(){
@@ -109,8 +111,8 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
       var r=await api('/api/scan',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:input.value})});
       if(!r.ok){showErr(r.data.error||"Scan failed.");return}
       render(r.data);history.replaceState(null,"","/?id="+r.data.id);out.scrollIntoView({behavior:'smooth'});
-    }catch(_){showErr("Couldn't reach Preflight. Check your connection and try again.")}
-    finally{btn.disabled=false;btn.textContent="Run preflight";btn.classList.remove('scan-anim')}
+    }catch(_){showErr("Couldn't reach Prelaunch Check. Check your connection and try again.")}
+    finally{btn.disabled=false;btn.textContent="Run the check";btn.classList.remove('scan-anim')}
   });
 
   function render(d){
@@ -131,6 +133,7 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
 
     if(d.hiddenSecurityChecks) wrapAll.appendChild(verifyPanel(d));
     if(!d.paid && fails.length) wrapAll.appendChild(lockPanel(d,fails.length));
+    wrapAll.appendChild(sharePanel(d));
 
     Object.keys(CATS).forEach(function(cat){
       var items=d.checks.filter(function(c){return c.category===cat});
@@ -152,6 +155,30 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
     out.appendChild(wrapAll);
   }
 
+  function sharePanel(d){
+    var p=el('section','panel verify');
+    p.appendChild(el('h3',null,d.grade<='B'?"Show off your "+d.grade:"Share your grade"));
+    p.appendChild(el('p',null,"Get a public link with a preview card, and a badge for your site. They only show your grade and score, never the report."));
+    var b=el('button','primary',"Create share link and badge");b.type='button';
+    var out=el('div');out.style.cssText="display:flex;flex-direction:column;gap:10px";
+    b.onclick=async function(){b.disabled=true;var r=await api('/api/share/'+d.id,{method:'POST'});b.disabled=false;if(!r.ok){out.textContent=r.data.error||"Couldn't create the link.";return}
+      b.hidden=true;out.innerHTML="";
+      out.appendChild(copyRow(r.data.shareUrl));
+      var x=el('a','btn ghost',"Post it on X");x.target="_blank";x.rel="noopener";
+      x.href="https://x.com/intent/post?text="+encodeURIComponent("My site got "+(/^[AF]$/.test(d.grade)?"an ":"a ")+d.grade+" on launch readiness. Check yours free:")+"&url="+encodeURIComponent(r.data.shareUrl);
+      out.appendChild(x);
+      out.appendChild(el('p','note',"Badge for your site's footer:"));
+      out.appendChild(copyRow('<a href="'+r.data.shareUrl+'"><img src="'+r.data.badgeUrl+'" alt="Prelaunch Check grade '+d.grade+'" height="22"></a>'));
+    };
+    p.appendChild(b);p.appendChild(out);return p;
+  }
+  function copyRow(text){
+    var row=el('div','code');var code=el('code',null,text);row.appendChild(code);
+    var c=el('button','ghost',"Copy");c.type='button';
+    c.onclick=function(){navigator.clipboard.writeText(text).then(function(){c.textContent="Copied"},function(){var r=document.createRange();r.selectNodeContents(code);var s=getSelection();s.removeAllRanges();s.addRange(r)})};
+    row.appendChild(c);return row;
+  }
+
   function lockPanel(d,n){
     var p=el('section','panel locked');
     p.appendChild(el('h3',null,"Get the fix for all "+n+" issue"+(n>1?"s":"")));
@@ -165,14 +192,14 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
   function verifyPanel(d){
     var p=el('section','panel verify');
     p.appendChild(el('h3',null,"Is this your site? Unlock the leaked-key checks"));
-    p.appendChild(el('p',null,d.hiddenSecurityChecks+" checks look for API keys in your code, a public .env file and an exposed .git folder. To keep attackers from using Preflight to find targets, we only show these to the owner. It's free."));
+    p.appendChild(el('p',null,d.hiddenSecurityChecks+" checks look for API keys in your code, a public .env file and an exposed .git folder. To keep attackers from using this tool to find targets, we only show these to the owner. It's free."));
     p.appendChild(el('p','note',"Add this tag inside <head> on your home page and deploy:"));
-    var tag='<meta name="preflight-verify" content="'+d.verifyToken+'">';
+    var tag='<meta name="prelaunch-verify" content="'+d.verifyToken+'">';
     var row=el('div','code');var code=el('code',null,tag);row.appendChild(code);
     var copy=el('button','ghost',"Copy");copy.type='button';
     copy.onclick=function(){navigator.clipboard.writeText(tag).then(function(){copy.textContent="Copied"},function(){var r=document.createRange();r.selectNodeContents(code);var s=getSelection();s.removeAllRanges();s.addRange(r)})};
     row.appendChild(copy);p.appendChild(row);
-    p.appendChild(el('p','note',"Or upload a file at /.well-known/preflight-verify.txt containing "+d.verifyToken+"."));
+    p.appendChild(el('p','note',"Or upload a file at /.well-known/prelaunch-verify.txt containing "+d.verifyToken+"."));
     var chk=el('button','primary',"I've deployed it, check now");chk.type='button';
     var msg=el('p','err');msg.hidden=true;
     chk.onclick=async function(){chk.disabled=true;chk.textContent="Checking…";var r=await api('/api/verify/'+d.id,{method:'POST'});chk.disabled=false;chk.textContent="I've deployed it, check now";if(r.ok){render(r.data)}else{msg.textContent=r.data.error;msg.hidden=false}};
@@ -180,6 +207,8 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
     return p;
   }
 
+  var pre=new URLSearchParams(location.search).get('url');
+  if(pre){input.value=pre;history.replaceState(null,'','/');form.requestSubmit()}
   var id=new URLSearchParams(location.search).get('id');
   if(id&&/^[a-f0-9-]{36}$/.test(id)){api('/api/scan/'+id).then(function(r){if(r.ok){render(r.data);input.value=new URL(r.data.url).host;if(location.hash==='#report')out.scrollIntoView()}else showErr(r.data.error)})}
 })();

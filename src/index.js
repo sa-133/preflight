@@ -2,6 +2,17 @@ import { runScan, UserError, scoreChecks, grade, normalizeUrl } from "./scan.js"
 import { fixFor } from "./fixes.js";
 import { PAGE } from "./page.js";
 import { legalPage, CONTACT } from "./legal.js";
+import { GUIDES, findGuide } from "./guides.js";
+import { guidesIndex, guidePage, sharePage, badgeSvg, sitemapXml } from "./site.js";
+import OG_DEFAULT from "../assets/og.png";
+import OG_A from "../assets/grade-A.png";
+import OG_B from "../assets/grade-B.png";
+import OG_C from "../assets/grade-C.png";
+import OG_D from "../assets/grade-D.png";
+import OG_F from "../assets/grade-F.png";
+
+const IMAGES = { "/og.png": OG_DEFAULT, "/og/grade-A.png": OG_A, "/og/grade-B.png": OG_B, "/og/grade-C.png": OG_C, "/og/grade-D.png": OG_D, "/og/grade-F.png": OG_F };
+const html = (body, status = 200) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS } });
 
 const TTL = 60 * 60 * 24 * 30; // keep reports 30 days
 const SCANS_PER_HOUR = 10;
@@ -14,24 +25,42 @@ const SECURITY_HEADERS = {
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   "referrer-policy": "strict-origin-when-cross-origin",
-  "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self' https://buy.stripe.com",
+  "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'; form-action 'self' https://buy.stripe.com",
 };
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const p = url.pathname;
+    if (url.hostname === "www.prelaunchcheck.dev") return Response.redirect("https://prelaunchcheck.dev" + p + url.search, 301);
     try {
+      if (IMAGES[p]) return new Response(IMAGES[p], { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
+      if (request.method === "GET" && p === "/guides") return html(guidesIndex());
+      let g;
+      if (request.method === "GET" && (g = p.match(/^\/guides\/([a-z0-9-]+)\/?$/))) {
+        const guide = findGuide(g[1]);
+        return guide ? html(guidePage(guide)) : html(guidesIndex(), 404);
+      }
+      if (request.method === "GET" && (g = p.match(/^\/s\/([a-f0-9]{16})$/))) {
+        const pub = await env.SCANS.get("pub:" + g[1], "json");
+        return pub ? html(sharePage(g[1], pub)) : new Response(null, { status: 302, headers: { location: "/" } });
+      }
+      if (request.method === "GET" && (g = p.match(/^\/badge\/([a-f0-9]{16})\.svg$/))) {
+        const pub = await env.SCANS.get("pub:" + g[1], "json");
+        if (!pub) return new Response("Not found", { status: 404 });
+        return new Response(badgeSvg(pub), { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=3600" } });
+      }
+      if (request.method === "GET" && p === "/api/stats") return json(await readStats(env));
       if (request.method === "GET" && (p === "/" || p === "/index.html")) {
         return new Response(PAGE.replace("__PRICE__", env.PRICE_LABEL || "$7").replace("__CONTACT__", CONTACT), {
           headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS },
         });
       }
       if (request.method === "GET" && ["/terms", "/privacy", "/refunds"].includes(p)) {
-        return new Response(legalPage(p.slice(1)), { headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS } });
+        return html(legalPage(p.slice(1)));
       }
       if (p === "/robots.txt") return new Response(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${url.origin}/sitemap.xml\n`, { headers: { "content-type": "text/plain" } });
-      if (p === "/sitemap.xml") return new Response(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url.origin}/</loc></url><url><loc>${url.origin}/terms</loc></url><url><loc>${url.origin}/privacy</loc></url><url><loc>${url.origin}/refunds</loc></url></urlset>`, { headers: { "content-type": "application/xml" } });
+      if (p === "/sitemap.xml") return new Response(sitemapXml(), { headers: { "content-type": "application/xml" } });
 
       if (request.method === "POST" && p === "/api/scan") return await handleScan(request, env);
       let m;
@@ -47,6 +76,7 @@ export default {
         link.searchParams.set("client_reference_id", m[1]);
         return Response.redirect(link.href, 303);
       }
+      if (request.method === "POST" && (m = p.match(/^\/api\/share\/([a-f0-9-]{36})$/))) return await handleShare(env, m[1], url);
       if (request.method === "GET" && p === "/paid") return await handlePaid(env, url);
       if (env.DEV_UNLOCK === "1" && request.method === "POST" && (m = p.match(/^\/api\/dev-unlock\/([a-f0-9-]{36})$/))) {
         const rec = await load(env, m[1]); if (!rec) return json({ error: "not found" }, 404);
@@ -78,6 +108,7 @@ async function handleScan(request, env) {
   const token = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
   const rec = { result, verifyToken: "pf-" + token, paid: false, verified: false };
   await save(env, id, rec);
+  await bump(env, "scans");
   return json(view(rec, id, env));
 }
 
@@ -89,20 +120,21 @@ async function handleVerify(env, id) {
   const tok = rec.verifyToken;
   let ok = false;
   try {
-    const r = await fetch(origin + "/.well-known/preflight-verify.txt", { redirect: "follow" });
+    const r = await fetch(origin + "/.well-known/prelaunch-verify.txt", { redirect: "follow" });
     if (r.ok && (await r.text()).includes(tok)) ok = true;
   } catch {}
   if (!ok) {
     try {
       const r = await fetch(rec.result.url, { redirect: "follow" });
       const html = await r.text();
-      const re = new RegExp(`<meta[^>]+name=["']preflight-verify["'][^>]+content=["']${tok}["']|<meta[^>]+content=["']${tok}["'][^>]+name=["']preflight-verify["']`, "i");
+      const re = new RegExp(`<meta[^>]+name=["']prelaunch-verify["'][^>]+content=["']${tok}["']|<meta[^>]+content=["']${tok}["'][^>]+name=["']prelaunch-verify["']`, "i");
       if (re.test(html)) ok = true;
     } catch {}
   }
   if (!ok) return json({ error: "We couldn't find your verification code on the site yet. Deploy the change, wait a minute, and try again.", ...view(rec, id, env) }, 400);
   rec.verified = true;
   await save(env, id, rec);
+  await bump(env, "verified");
   return json(view(rec, id, env));
 }
 
@@ -116,8 +148,10 @@ async function handlePaid(env, url) {
   if (s.payment_status !== "paid" || !/^[a-f0-9-]{36}$/.test(id || "")) return new Response("That payment isn't complete yet.", { status: 402 });
   const rec = await load(env, id);
   if (!rec) return new Response("Payment received, but the report expired. Email " + CONTACT + " with this code and we'll rescan for free: " + id, { status: 404 });
+  const firstTime = !rec.paid;
   rec.paid = true; rec.sessionId = sid;
   await save(env, id, rec);
+  if (firstTime) await bump(env, "paid");
   return Response.redirect(new URL("/?id=" + id + "#report", url).href, 303);
 }
 
@@ -143,4 +177,45 @@ export function view(rec, id, env = {}) {
     devUnlock: env.DEV_UNLOCK === "1",
     checks,
   };
+}
+
+// ---- sharing ----
+async function handleShare(env, id, url) {
+  const rec = await load(env, id);
+  if (!rec) return json({ error: "This report has expired. Run a new scan." }, 404);
+  if (!rec.pubId) {
+    // A separate random ID: the share link must never open the private report.
+    rec.pubId = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const pubChecks = rec.result.checks.filter((c) => !c.sensitive);
+    const score = scoreChecks(pubChecks);
+    const pub = { host: new URL(rec.result.url).host, grade: grade(score), score, total: pubChecks.length,
+      passed: pubChecks.filter((c) => c.pass).length, date: rec.result.scannedAt.slice(0, 10) };
+    await env.SCANS.put("pub:" + rec.pubId, JSON.stringify(pub), { expirationTtl: 60 * 60 * 24 * 365 });
+    await save(env, id, rec);
+    await bump(env, "shares");
+  }
+  const origin = url.hostname.endsWith("workers.dev") ? url.origin : "https://prelaunchcheck.dev";
+  return json({ shareUrl: `${origin}/s/${rec.pubId}`, badgeUrl: `${origin}/badge/${rec.pubId}.svg` });
+}
+
+// ---- stats (aggregate counts only, no sites or people) ----
+function today() { return new Date().toISOString().slice(0, 10); }
+async function bump(env, field) {
+  try {
+    const key = "st:" + today();
+    const cur = (await env.SCANS.get(key, "json")) || {};
+    cur[field] = (cur[field] || 0) + 1;
+    await env.SCANS.put(key, JSON.stringify(cur), { expirationTtl: 60 * 60 * 24 * 400 });
+  } catch {}
+}
+async function readStats(env) {
+  const days = [];
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    const v = (await env.SCANS.get("st:" + d, "json")) || {};
+    days.push({ date: d, scans: v.scans || 0, verified: v.verified || 0, shares: v.shares || 0, paid: v.paid || 0 });
+  }
+  const sum = (k, n) => days.slice(0, n).reduce((a, d) => a + d[k], 0);
+  return { last7: { scans: sum("scans", 7), verified: sum("verified", 7), shares: sum("shares", 7), paid: sum("paid", 7) },
+    last30: { scans: sum("scans", 30), verified: sum("verified", 30), shares: sum("shares", 30), paid: sum("paid", 30) }, days };
 }
