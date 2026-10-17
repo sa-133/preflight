@@ -84,6 +84,8 @@ export default {
         return rec ? json(view(rec, m[1], env)) : json({ error: "This report has expired. Run a new scan." }, 404);
       }
       if (request.method === "POST" && (m = p.match(/^\/api\/verify\/([a-f0-9-]{36})$/))) return await handleVerify(env, m[1]);
+      if (request.method === "GET" && (m = p.match(/^\/api\/subdomains\/([a-f0-9-]{36})$/))) return await handleSubList(env, m[1]);
+      if (request.method === "POST" && (m = p.match(/^\/api\/subdomains\/([a-f0-9-]{36})\/scan$/))) return await handleSubScan(request, env, m[1]);
       if (request.method === "GET" && (m = p.match(/^\/checkout\/([a-f0-9-]{36})$/))) {
         if (!env.STRIPE_PAYMENT_LINK) return new Response("Payments are not set up yet.", { status: 503 });
         if (!(await load(env, m[1]))) return new Response("Report not found.", { status: 404 });
@@ -151,21 +153,29 @@ async function handleVerify(env, id) {
   const origin = new URL(rec.result.url).origin;
   normalizeUrl(origin, { allowLocal: env.ALLOW_LOCAL === "1" });
   const tok = rec.verifyToken;
-  let ok = false;
+  const re = new RegExp(`<meta[^>]+name=["']prelaunch-verify["'][^>]+content=["']${tok}["']|<meta[^>]+content=["']${tok}["'][^>]+name=["']prelaunch-verify["']`, "i");
+  // "domain" = proof sits at the site root (the well-known file or the home page), which also
+  // unlocks scanning its subdomains. "page" = a tag on some inner page: this report only.
+  let via = null;
   try {
     const r = await fetch(origin + "/.well-known/prelaunch-verify.txt", { redirect: "follow" });
-    if (r.ok && (await r.text()).includes(tok)) ok = true;
+    if (r.ok && sameOrigin(r, origin) && (await r.text()).includes(tok)) via = "domain";
   } catch {}
-  if (!ok) {
+  if (!via) {
     try {
-      const r = await fetch(rec.result.url, { redirect: "follow" });
-      const html = await r.text();
-      const re = new RegExp(`<meta[^>]+name=["']prelaunch-verify["'][^>]+content=["']${tok}["']|<meta[^>]+content=["']${tok}["'][^>]+name=["']prelaunch-verify["']`, "i");
-      if (re.test(html)) ok = true;
+      const r = await fetch(origin + "/", { redirect: "follow" });
+      if (r.ok && sameOrigin(r, origin) && re.test(await r.text())) via = "domain";
     } catch {}
   }
-  if (!ok) return json({ error: "We couldn't find your verification code on the site yet. Deploy the change, wait a minute, and try again.", ...view(rec, id, env) }, 400);
+  if (!via && new URL(rec.result.url).pathname !== "/") {
+    try {
+      const r = await fetch(rec.result.url, { redirect: "follow" });
+      if (re.test(await r.text())) via = "page";
+    } catch {}
+  }
+  if (!via) return json({ error: "We couldn't find your verification code on the site yet. Deploy the change, wait a minute, and try again.", ...view(rec, id, env) }, 400);
   rec.verified = true;
+  rec.verifiedVia = via;
   await save(env, id, rec);
   await bump(env, "verified");
   return json(view(rec, id, env));
@@ -213,8 +223,109 @@ export function view(rec, id, env = {}) {
     verifyToken: rec.verifyToken,
     checkoutReady: !!env.STRIPE_PAYMENT_LINK || env.DEV_UNLOCK === "1",
     devUnlock: env.DEV_UNLOCK === "1",
+    subdomainRoot: subRoot(rec),
+    subScans: subRoot(rec) ? rec.subScans || {} : undefined,
+    verifiedVia: rec.verifiedVia || null,
+    parent: rec.parent ? { id: rec.parent.id, host: rec.parent.root } : null,
     checks,
   };
+}
+
+// ---- subdomains (owner-only) ----
+// Proof at the root of a site covers the hosts below it: verifying example.com (or www.example.com)
+// unlocks *.example.com; verifying app.example.com unlocks *.app.example.com only. Nothing above
+// the verified host is ever reachable, so no public-suffix list is needed.
+const SUB_SCANS_PER_DAY = 25;
+const MAX_SUBS = 60;
+function subRoot(rec) {
+  if (!rec.verified || rec.verifiedVia !== "domain" || rec.parent) return null;
+  return new URL(rec.result.url).hostname.toLowerCase().replace(/^www\./, "");
+}
+function sameOrigin(res, origin) { try { return !res.url || new URL(res.url).origin === origin; } catch { return false; } }
+function inScope(host, root) { return host === root || host.endsWith("." + root); }
+const HOST_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/;
+
+async function fetchJson(url, ms = 15000) {
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { "user-agent": "PrelaunchCheckBot/1.0 (+site launch checker)", accept: "application/json" } });
+    return r.ok ? await r.json() : null;
+  } catch { return null; } finally { clearTimeout(t); }
+}
+
+// Certificate Transparency logs: every HTTPS certificate is public, so they list the hostnames
+// a domain has issued certificates for. Two sources, because crt.sh is often slow.
+async function discoverSubdomains(root) {
+  const names = new Set();
+  const addName = (n) => {
+    n = String(n || "").trim().toLowerCase().replace(/^\*\./, "").replace(/\.$/, "");
+    if (n && n !== root && n !== "www." + root && n.endsWith("." + root) && HOST_RE.test(n)) names.add(n);
+  };
+  const [crt, cs] = await Promise.all([
+    fetchJson(`https://crt.sh/?q=${encodeURIComponent("%." + root)}&output=json&exclude=expired`),
+    fetchJson(`https://api.certspotter.com/v1/issuances?domain=${encodeURIComponent(root)}&include_subdomains=true&expand=dns_names`),
+  ]);
+  for (const row of Array.isArray(crt) ? crt : []) String(row.name_value || "").split("\n").forEach(addName);
+  for (const row of Array.isArray(cs) ? cs : []) (row.dns_names || []).forEach(addName);
+  return { hosts: [...names].sort((a, b) => a.split(".").length - b.split(".").length || a.localeCompare(b)).slice(0, MAX_SUBS), sourcesOk: !!(crt || cs) };
+}
+
+async function handleSubList(env, id) {
+  const rec = await load(env, id);
+  if (!rec) return json({ error: "This report has expired. Run a new scan." }, 404);
+  const root = subRoot(rec);
+  if (!root) return json({ error: "Verify this site with the home page tag or the .well-known file first." }, 403);
+  const cacheKey = "subs:" + root;
+  let found = await env.SCANS.get(cacheKey, "json");
+  if (!found) {
+    found = await discoverSubdomains(root);
+    if (found.sourcesOk) await env.SCANS.put(cacheKey, JSON.stringify(found), { expirationTtl: 60 * 60 * 6 });
+  }
+  const scanned = rec.subScans || {};
+  return json({ root, hosts: found.hosts, sourcesOk: found.sourcesOk, scanned, remaining: SUB_SCANS_PER_DAY - await subUsed(env, id) });
+}
+
+async function subUsed(env, id) { return Number((await env.SCANS.get(`subq:${id}:${today()}`)) || 0); }
+
+async function handleSubScan(request, env, id) {
+  const rec = await load(env, id);
+  if (!rec) return json({ error: "This report has expired. Run a new scan." }, 404);
+  const root = subRoot(rec);
+  if (!root) return json({ error: "Verify this site with the home page tag or the .well-known file first." }, 403);
+  let body; try { body = await request.json(); } catch { throw new UserError("Send a subdomain."); }
+  let host = String(body.host || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/[/?#].*$/, "").replace(/\.$/, "");
+  // Local testing only: fixtures run on ports, e.g. app.localhost:8791.
+  const devPort = env.ALLOW_LOCAL === "1" && host.match(/:(\d{2,5})$/);
+  if (devPort) host = host.slice(0, -devPort[0].length);
+  if (!HOST_RE.test(host) || !inScope(host, root)) return json({ error: `Only hosts under ${root} can be scanned from this report.` }, 400);
+  const used = await subUsed(env, id);
+  if (used >= SUB_SCANS_PER_DAY) return json({ error: `You've used today's ${SUB_SCANS_PER_DAY} subdomain checks for this site. Try again tomorrow.` }, 429);
+  await env.SCANS.put(`subq:${id}:${today()}`, String(used + 1), { expirationTtl: 60 * 60 * 26 });
+
+  let result;
+  try { result = await runScan(devPort ? `http://${host}${devPort[0]}` : "https://" + host, { allowLocal: env.ALLOW_LOCAL === "1" }); }
+  catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    // Certificate logs list plenty of hosts that no longer answer; remember that instead of failing.
+    const miss = { host, error: e.message, at: new Date().toISOString() };
+    rec.subScans = { ...(rec.subScans || {}), [host]: miss };
+    await save(env, id, rec);
+    return json({ ...miss, remaining: SUB_SCANS_PER_DAY - used - 1 });
+  }
+  const finalHost = new URL(result.url).hostname.toLowerCase();
+  // A redirect off your domain lands on someone else's site, so the owner unlock can't come along.
+  const verified = inScope(finalHost, root);
+  const childId = crypto.randomUUID();
+  const token = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const child = { result, verifyToken: "pf-" + token, paid: false, verified, verifiedVia: verified ? "parent" : undefined, parent: { id, root } };
+  await save(env, childId, child);
+  await bump(env, "subScans");
+  const v = view(child, childId, env);
+  const summary = { id: childId, host, finalHost, grade: v.grade, score: v.score, issues: v.checks.filter((c) => !c.pass).length,
+    critical: v.checks.filter((c) => !c.pass && c.severity === "critical").length, verified, at: result.scannedAt };
+  rec.subScans = { ...(rec.subScans || {}), [host]: summary };
+  await save(env, id, rec);
+  return json({ ...summary, remaining: SUB_SCANS_PER_DAY - used - 1 });
 }
 
 // ---- sharing ----
@@ -251,10 +362,10 @@ async function readStats(env) {
   for (let i = 0; i < 30; i++) {
     const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
     const v = (await env.SCANS.get("st:" + d, "json")) || {};
-    days.push({ date: d, scans: v.scans || 0, toolScans: v.toolScans || 0, verified: v.verified || 0, shares: v.shares || 0, checkout: v.checkout || 0, paid: v.paid || 0 });
+    days.push({ date: d, scans: v.scans || 0, toolScans: v.toolScans || 0, subScans: v.subScans || 0, verified: v.verified || 0, shares: v.shares || 0, checkout: v.checkout || 0, paid: v.paid || 0 });
   }
   const sum = (k, n) => days.slice(0, n).reduce((a, d) => a + d[k], 0);
-  const keys = ["scans", "toolScans", "verified", "shares", "checkout", "paid"];
+  const keys = ["scans", "toolScans", "subScans", "verified", "shares", "checkout", "paid"];
   const tot = (n) => Object.fromEntries(keys.map((k) => [k, sum(k, n)]));
   return { last7: tot(7), last30: tot(30), days };
 }

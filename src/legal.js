@@ -35,13 +35,14 @@ const PAGES = {
 <h2>What we store</h2>
 <ul>
 <li><b>Scan reports:</b> the address you scanned and the results, kept for 30 days so you can re-open your report, then deleted automatically. Leaked keys are stored only in masked form (first and last few characters).</li>
+<li><b>Subdomain lookups:</b> when a verified owner asks, we look up their domain's hostnames in public certificate logs (crt.sh and Cert Spotter). The list is cached for 6 hours and shown only to that owner.</li>
 <li><b>Your IP address:</b> used only to enforce the hourly scan limit, kept for about an hour.</li>
 <li><b>Payments:</b> handled entirely by Stripe. We never see or store your card details. Stripe tells us whether a payment for a report succeeded.</li>
 </ul>
 <h2>What we don't do</h2>
 <p>No accounts, no tracking cookies, no ad trackers, and we don't sell or share your data.</p>
 <h2>Service providers</h2>
-<p>Prelaunch Check runs on Cloudflare and takes payments through Stripe. Each handles data under its own privacy policy.</p>
+<p>Prelaunch Check runs on Cloudflare, takes payments through Stripe, and queries crt.sh and Cert Spotter for subdomain lookups. Each handles data under its own privacy policy.</p>
 <h2>Contact</h2>
 <p>To ask about or delete your data, email <b>${CONTACT}</b>.</p>`,
   },

@@ -4,6 +4,7 @@ Check your site before you ship it. Paste a URL, get a launch checklist: leaked 
 
 - **Free:** score, grade and pass/fail for every check.
 - **Owner-only (free):** leaked-key, `.env` and `.git` checks, unlocked by adding a verification tag. Non-owners never see whether a site leaks keys.
+- **Subdomains (owner-only, free):** verifying the home page (tag) or `/.well-known/prelaunch-verify.txt` covers every host below it. The owner can list subdomains from public certificate logs (crt.sh, Cert Spotter) and scan them; each gets its own report with owner checks unlocked. 25 subdomain scans per verified report per day. A verified `app.example.com` only covers `*.app.example.com`, never the parent.
 - **Paid ($7, one-time):** step-by-step fixes tailored to the detected stack (Next.js, Vite, Supabase, Vercel, Netlify) and the full list of broken links.
 
 Runs as a single Cloudflare Worker with one KV namespace. Payments use a Stripe Payment Link.
@@ -35,5 +36,7 @@ npx wrangler dev        # .dev.vars sets ALLOW_LOCAL=1 and DEV_UNLOCK=1 for test
 | `POST /api/scan` | `{url}` → runs a scan (10 per IP per hour) |
 | `GET /api/scan/:id` | Re-open a report (kept 30 days) |
 | `POST /api/verify/:id` | Checks the owner's meta tag or `/.well-known/preflight-verify.txt` |
+| `GET /api/subdomains/:id` | Owner only: subdomains from certificate logs (cached 6h) and past results |
+| `POST /api/subdomains/:id/scan` | Owner only: `{host}` → scans a host under the verified domain |
 | `GET /checkout/:id` | Redirects to Stripe with the report ID attached |
 | `GET /paid?session_id=` | Confirms payment with Stripe, unlocks the report |

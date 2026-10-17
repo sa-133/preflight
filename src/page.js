@@ -77,6 +77,14 @@ button[disabled]{opacity:.6;cursor:wait}
 .code code{flex:1 1 260px;min-width:0;font:500 13px var(--mono);background:var(--bg);padding:12px;border-radius:8px;overflow-x:auto;white-space:nowrap}
 .verify{display:flex;flex-direction:column;gap:12px}
 .note{font-size:14px;color:var(--muted)}
+.subs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.sub{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.sub .h{font:500 14px var(--mono);overflow-wrap:anywhere} .sub .st{font-size:13px;color:var(--muted);text-align:right}
+.sub .g{display:inline-block;min-width:22px;text-align:center;font-weight:800;margin-right:6px}
+.g.grade-A,.g.grade-B{color:var(--ok)} .g.grade-C{color:var(--warn)} .g.grade-D,.g.grade-F{color:var(--bad)}
+.sub .crit{color:var(--bad);font-weight:600}
+.row{display:flex;gap:8px;flex-wrap:wrap} .row input{flex:1 1 220px;min-width:0}
+@media (max-width:520px){.sub{grid-template-columns:1fr auto}.sub .st{grid-column:1/3;text-align:left}}
 footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:16px}
 @media (max-width:520px){.summary{grid-template-columns:1fr}.item{grid-template-columns:26px 1fr}.sev{grid-column:2;justify-self:start}}
 @media (prefers-reduced-motion:no-preference){.scan-anim{animation:pulse 1s ease-in-out infinite alternate}@keyframes pulse{from{opacity:.55}to{opacity:1}}}
@@ -136,6 +144,9 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
     info.appendChild(counts);s.appendChild(g);s.appendChild(info);wrapAll.appendChild(s);
 
     if(d.hiddenSecurityChecks) wrapAll.appendChild(verifyPanel(d));
+    if(d.parent) wrapAll.appendChild(parentNote(d));
+    else if(d.subdomainRoot) wrapAll.appendChild(subPanel(d));
+    else if(d.verified) wrapAll.appendChild(rootHint(d));
     if(!d.paid && fails.length) wrapAll.appendChild(lockPanel(d,fails.length));
     wrapAll.appendChild(sharePanel(d));
 
@@ -205,11 +216,85 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
     var copy=el('button','ghost',"Copy");copy.type='button';
     copy.onclick=function(){navigator.clipboard.writeText(tag).then(function(){copy.textContent="Copied"},function(){var r=document.createRange();r.selectNodeContents(code);var s=getSelection();s.removeAllRanges();s.addRange(r)})};
     row.appendChild(copy);p.appendChild(row);
-    p.appendChild(el('p','note',"Or upload a file at /.well-known/prelaunch-verify.txt containing "+d.verifyToken+"."));
+    p.appendChild(el('p','note',"Or upload a file at /.well-known/prelaunch-verify.txt containing "+d.verifyToken+". Either one also lets you scan this domain's subdomains."));
     var chk=el('button','primary',"I've deployed it, check now");chk.type='button';
     var msg=el('p','err');msg.hidden=true;
     chk.onclick=async function(){chk.disabled=true;chk.textContent="Checking…";var r=await api('/api/verify/'+d.id,{method:'POST'});chk.disabled=false;chk.textContent="I've deployed it, check now";if(r.ok){render(r.data)}else{msg.textContent=r.data.error;msg.hidden=false}};
     p.appendChild(chk);p.appendChild(msg);
+    return p;
+  }
+
+  function parentNote(d){
+    var p=el('section','panel verify');
+    p.appendChild(el('h3',null,"Subdomain of "+d.parent.host));
+    var t=el('p');t.appendChild(document.createTextNode("Owner checks are unlocked because you verified "+d.parent.host+". "));
+    var a=el('a',null,"Back to "+d.parent.host);a.href='/?id='+d.parent.id+'#report';t.appendChild(a);p.appendChild(t);return p;
+  }
+  function rootHint(d){
+    var p=el('section','panel verify');
+    p.appendChild(el('h3',null,"Want to scan your subdomains too?"));
+    p.appendChild(el('p',null,"Your tag was found on an inner page, which only covers this report. Put the same tag on your home page, or upload /.well-known/prelaunch-verify.txt, to also check app., api., staging. and the rest."));
+    var b=el('button','ghost',"Check again");b.type='button';var msg=el('p','err');msg.hidden=true;
+    b.onclick=async function(){b.disabled=true;var r=await api('/api/verify/'+d.id,{method:'POST'});b.disabled=false;if(r.ok){render(r.data)}else{msg.textContent=r.data.error;msg.hidden=false}};
+    p.appendChild(b);p.appendChild(msg);return p;
+  }
+  function subPanel(d){
+    var p=el('section','panel verify');var root=d.subdomainRoot;var rows={};var remaining=null;
+    p.appendChild(el('h3',null,"Scan your subdomains"));
+    p.appendChild(el('p',null,"Your verification covers everything under "+root+". Leaks often hide on app., api. or an old staging. site rather than the home page. We list hostnames from public certificate logs, and only you see them."));
+    var list=el('ul','subs');var status=el('p','note');status.hidden=true;
+    var find=el('button','primary',"Find subdomains");find.type='button';
+    var all=el('button','ghost',"Scan all");all.type='button';all.style.display='none';
+    var btns=el('div','row');btns.appendChild(find);btns.appendChild(all);
+    var manual=el('form','row');var mi=el('input');mi.type='text';mi.placeholder='staging.'+root;mi.setAttribute('aria-label','Subdomain to scan');
+    var mb=el('button','ghost',"Scan");mb.type='submit';manual.appendChild(mi);manual.appendChild(mb);
+    function stateText(r){
+      var st=el('span','st');
+      if(!r){st.textContent="Not checked";return st}
+      if(r.error){st.textContent=r.error;return st}
+      var a=el('a');a.href='/?id='+r.id+'#report';
+      a.appendChild(el('span','g grade-'+r.grade,r.grade));
+      a.appendChild(document.createTextNode(r.issues?r.issues+" to fix":"All clear"));
+      st.appendChild(a);
+      if(r.critical){st.appendChild(document.createTextNode(" · "));st.appendChild(el('span','crit',r.critical+" critical"))}
+      if(r.finalHost&&r.finalHost!==r.host)st.appendChild(el('div',null,"Redirects to "+r.finalHost+(r.verified?"":", outside your domain, so owner checks stay locked")));
+      return st;
+    }
+    function row(host,r){
+      var li=rows[host];
+      if(!li){li=el('li','sub');rows[host]=li;list.appendChild(li)}
+      li.innerHTML="";li.appendChild(el('span','h',host));li.appendChild(stateText(r));
+      var b=el('button','ghost',r?"Rescan":"Scan");b.type='button';b.onclick=function(){scanOne(host)};li.dataset.done=r?"1":"";li.appendChild(b);
+      return li;
+    }
+    async function scanOne(host){
+      var li=rows[host]||row(host,null);var b=li.querySelector('button');b.disabled=true;b.textContent="Scanning…";b.classList.add('scan-anim');
+      var r=await api('/api/subdomains/'+d.id+'/scan',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({host:host})});
+      if(!r.ok){b.disabled=false;b.classList.remove('scan-anim');b.textContent="Scan";status.textContent=r.data.error||"Scan failed.";status.hidden=false;return false}
+      if(typeof r.data.remaining==='number'){remaining=r.data.remaining;updateAll()}
+      var h2=r.data.host||host;if(h2!==host&&rows[host]){rows[host].remove();delete rows[host]}row(h2,r.data);updateAll();return true;
+    }
+    function updateAll(){var left=Object.keys(rows).filter(function(h){return !rows[h].dataset.done}).length;all.style.display=left?'':'none';all.textContent="Scan all "+left+(remaining!=null?" ("+remaining+" checks left today)":"")}
+    find.onclick=async function(){
+      find.disabled=true;find.textContent="Searching certificate logs…";find.classList.add('scan-anim');status.hidden=true;
+      var r=await api('/api/subdomains/'+d.id);
+      find.disabled=false;find.classList.remove('scan-anim');find.textContent="Search again";
+      if(!r.ok){status.textContent=r.data.error||"Couldn't look up subdomains.";status.hidden=false;return}
+      remaining=r.data.remaining;
+      r.data.hosts.forEach(function(h){row(h,r.data.scanned[h]||null)});
+      if(!r.data.hosts.length){status.textContent=r.data.sourcesOk?"No subdomains found in certificate logs. Add one below if you know it.":"The certificate logs didn't answer. Try again in a minute, or add a subdomain below.";status.hidden=false}
+      updateAll();
+    };
+    all.onclick=async function(){
+      all.disabled=true;
+      var todo=Object.keys(rows).filter(function(h){return !rows[h].dataset.done});
+      for(var i=0;i<todo.length;i++){if(!(await scanOne(todo[i])))break}
+      all.disabled=false;updateAll();
+    };
+    manual.addEventListener('submit',function(e){e.preventDefault();var h=mi.value.trim().toLowerCase().replace(/^https?:[/][/]/,'').replace(/[/?#].*$/,'');if(!h)return;if(h.indexOf('.')<0)h=h+'.'+root;mi.value='';scanOne(h)});
+    Object.keys(d.subScans||{}).forEach(function(h){row(h,d.subScans[h])});
+    p.appendChild(btns);p.appendChild(status);p.appendChild(list);
+    p.appendChild(el('p','note',"Know one that isn't listed? Add it:"));p.appendChild(manual);
     return p;
   }
 
