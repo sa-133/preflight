@@ -91,7 +91,7 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
     <p id="error" class="err" hidden></p>
   </header>
   <main id="report" aria-live="polite"></main>
-  <footer>Preflight only reads what any visitor's browser can see. Leaked-key details are shown only to the site's verified owner, and we never charge to tell you a key is exposed.</footer>
+  <footer>Preflight only reads what any visitor's browser can see. Leaked-key details are shown only to the site's verified owner, and we never charge to tell you a key is exposed.<br>Questions or refunds: __CONTACT__ · <a href="/refunds">Refunds</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></footer>
 </div>
 <script>
 (function(){

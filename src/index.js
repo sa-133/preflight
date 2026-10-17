@@ -1,6 +1,7 @@
 import { runScan, UserError, scoreChecks, grade, normalizeUrl } from "./scan.js";
 import { fixFor } from "./fixes.js";
 import { PAGE } from "./page.js";
+import { legalPage, CONTACT } from "./legal.js";
 
 const TTL = 60 * 60 * 24 * 30; // keep reports 30 days
 const SCANS_PER_HOUR = 10;
@@ -22,12 +23,15 @@ export default {
     const p = url.pathname;
     try {
       if (request.method === "GET" && (p === "/" || p === "/index.html")) {
-        return new Response(PAGE.replace("__PRICE__", env.PRICE_LABEL || "$7"), {
+        return new Response(PAGE.replace("__PRICE__", env.PRICE_LABEL || "$7").replace("__CONTACT__", CONTACT), {
           headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS },
         });
       }
+      if (request.method === "GET" && ["/terms", "/privacy", "/refunds"].includes(p)) {
+        return new Response(legalPage(p.slice(1)), { headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS } });
+      }
       if (p === "/robots.txt") return new Response(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${url.origin}/sitemap.xml\n`, { headers: { "content-type": "text/plain" } });
-      if (p === "/sitemap.xml") return new Response(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url.origin}/</loc></url></urlset>`, { headers: { "content-type": "application/xml" } });
+      if (p === "/sitemap.xml") return new Response(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url.origin}/</loc></url><url><loc>${url.origin}/terms</loc></url><url><loc>${url.origin}/privacy</loc></url><url><loc>${url.origin}/refunds</loc></url></urlset>`, { headers: { "content-type": "application/xml" } });
 
       if (request.method === "POST" && p === "/api/scan") return await handleScan(request, env);
       let m;
@@ -106,12 +110,12 @@ async function handlePaid(env, url) {
   const sid = url.searchParams.get("session_id") || "";
   if (!/^cs_(test|live)_[A-Za-z0-9]+$/.test(sid) || !env.STRIPE_SECRET_KEY) return new Response("Invalid payment link.", { status: 400 });
   const r = await fetch("https://api.stripe.com/v1/checkout/sessions/" + sid, { headers: { authorization: "Bearer " + env.STRIPE_SECRET_KEY } });
-  if (!r.ok) return new Response("We couldn't confirm that payment. Email us and we'll sort it out.", { status: 402 });
+  if (!r.ok) return new Response("We couldn't confirm that payment. Email " + CONTACT + " and we'll sort it out.", { status: 402 });
   const s = await r.json();
   const id = s.client_reference_id;
   if (s.payment_status !== "paid" || !/^[a-f0-9-]{36}$/.test(id || "")) return new Response("That payment isn't complete yet.", { status: 402 });
   const rec = await load(env, id);
-  if (!rec) return new Response("Payment received, but the report expired. Email us with this code and we'll rescan for free: " + id, { status: 404 });
+  if (!rec) return new Response("Payment received, but the report expired. Email " + CONTACT + " with this code and we'll rescan for free: " + id, { status: 404 });
   rec.paid = true; rec.sessionId = sid;
   await save(env, id, rec);
   return Response.redirect(new URL("/?id=" + id + "#report", url).href, 303);
