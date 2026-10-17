@@ -51,7 +51,7 @@ async function timedFetch(url, opts = {}) {
   const t = setTimeout(() => ctrl.abort(), opts.timeout || TIMEOUT_MS);
   const started = Date.now();
   try {
-    const res = await fetch(url, { redirect: "follow", ...opts, signal: ctrl.signal, headers: { "user-agent": UA, ...(opts.headers || {}) } });
+    const res = await fetch(url, { redirect: "follow", ...opts, signal: ctrl.signal, headers: { "user-agent": UA, "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "accept-language": "en-US,en;q=0.9", ...(opts.headers || {}) } });
     return { res, ms: Date.now() - started };
   } finally { clearTimeout(t); }
 }
@@ -169,7 +169,9 @@ export async function runScan(target, { allowLocal = false } = {}) {
     if (second.ok) { url = alt; main = second; }
   }
   if (!main.ok) throw new UserError(main.error === "timeout" ? "The site took too long to respond." : "Couldn't reach that site. Check the address and try again.");
-  if (main.status >= 400) throw new UserError(`The site answered with an error (HTTP ${main.status}).`);
+  if ([401, 403, 429, 503].includes(main.status)) throw new UserError(`${url.host} blocked our check (HTTP ${main.status}). Large sites like Google often block automated tools. Your own site will almost always work, so try that.`);
+  if (main.status === 404) throw new UserError(`That page wasn't found (HTTP 404). Check the address and try again.`);
+  if (main.status >= 400) throw new UserError(`The site answered with an error (HTTP ${main.status}). If it's your site, check it loads in a browser, then try again.`);
 
   const final = new URL(main.finalUrl || url.href);
   const origin = final.origin;
