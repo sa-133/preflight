@@ -14,6 +14,7 @@ import OG_F from "../assets/grade-F.png";
 const IMAGES = { "/og.png": OG_DEFAULT, "/og/grade-A.png": OG_A, "/og/grade-B.png": OG_B, "/og/grade-C.png": OG_C, "/og/grade-D.png": OG_D, "/og/grade-F.png": OG_F };
 const html = (body, status = 200) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS } });
 
+const STATS_KEY_SHA256 = "a111a13155e39fdd7f10dbd2644cbf2f73318a6f77ac5b0f47dd824fbda3510f";
 const TTL = 60 * 60 * 24 * 30; // keep reports 30 days
 const SCANS_PER_HOUR = 10;
 
@@ -50,7 +51,13 @@ export default {
         if (!pub) return new Response("Not found", { status: 404 });
         return new Response(badgeSvg(pub), { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=3600" } });
       }
-      if (request.method === "GET" && p === "/api/stats") return json(await readStats(env));
+      if (request.method === "GET" && p === "/api/stats") {
+        // Private: only the weekly report knows the key. Only its SHA-256 lives in the code.
+        const key = url.searchParams.get("key") || "";
+        const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+        if (digest !== STATS_KEY_SHA256) return new Response("Not found", { status: 404 });
+        return json(await readStats(env));
+      }
       if (request.method === "GET" && (p === "/" || p === "/index.html")) {
         return new Response(PAGE.replace("__PRICE__", env.PRICE_LABEL || "$7").replace("__CONTACT__", CONTACT), {
           headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS },
