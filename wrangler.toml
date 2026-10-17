@@ -5,7 +5,7 @@ compatibility_date = "2024-09-23"
 # Create with: npx wrangler kv namespace create SCANS  (or in the Cloudflare dashboard)
 [[kv_namespaces]]
 binding = "SCANS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "e96b23c43bc144a3a5df2e416e83047f"
 
 [vars]
 PRICE_LABEL = "$7"
