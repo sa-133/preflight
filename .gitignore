@@ -1,0 +1,5 @@
+node_modules
+.dev.vars
+.wrangler
+fixtures/bad/assets/index-AbC123.js
+fixtures/bad/.well-known/
