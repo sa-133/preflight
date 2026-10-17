@@ -254,7 +254,9 @@ export async function runScan(target, { allowLocal = false } = {}) {
   const ogImage = metaContent(html, "og:image");
   const ogOk = !!metaContent(html, "og:title") && !!metaContent(html, "og:description") && !!ogImage;
   add({ id: "og", category: "seo", title: "Link previews look good", pass: ogOk, severity: "medium",
-    detail: ogOk ? "og:title, og:description and og:image set." : "Missing " + ["og:title", "og:description", "og:image"].filter((k) => !metaContent(html, k)).join(", ") + ". Shared links will look bare." });
+    detail: ogOk ? "og:title, og:description and og:image set." : "Missing " + ["og:title", "og:description", "og:image"].filter((k) => !metaContent(html, k)).join(", ") + ". Shared links will look bare.",
+    value: { title: (metaContent(html, "og:title") || title || "").slice(0, 200), description: (metaContent(html, "og:description") || desc || "").slice(0, 300),
+      image: ogImage ? (() => { try { return new URL(decodeEntities(ogImage), final).href; } catch { return ""; } })() : "", host: final.host } });
   add({ id: "twitter", category: "seo", title: "X/Twitter card set", pass: !!metaContent(html, "twitter:card"), severity: "low", detail: metaContent(html, "twitter:card") ? "twitter:card present." : "No twitter:card tag." });
   const iconTag = tags(html, "link").some((a) => /(^|\s)(icon|shortcut icon|apple-touch-icon)(\s|$)/i.test(a.rel || ""));
   const hasFavicon = iconTag || (favicon.ok && favicon.status === 200 && favicon.bytes > 0);

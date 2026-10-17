@@ -4,6 +4,7 @@ import { PAGE } from "./page.js";
 import { legalPage, CONTACT } from "./legal.js";
 import { GUIDES, findGuide } from "./guides.js";
 import { guidesIndex, guidePage, sharePage, badgeSvg, sitemapXml } from "./site.js";
+import { TOOLS, findTool, toolsIndex, toolPage } from "./tools.js";
 import OG_DEFAULT from "../assets/og.png";
 import OG_A from "../assets/grade-A.png";
 import OG_B from "../assets/grade-B.png";
@@ -26,7 +27,7 @@ const SECURITY_HEADERS = {
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   "referrer-policy": "strict-origin-when-cross-origin",
-  "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'; form-action 'self' https://buy.stripe.com",
+  "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'; form-action 'self' https://buy.stripe.com",
 };
 
 export default {
@@ -37,6 +38,13 @@ export default {
     try {
       if (IMAGES[p]) return new Response(IMAGES[p], { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
       if (request.method === "GET" && p === "/guides") return html(guidesIndex());
+      if (request.method === "GET" && p === "/tools") return html(toolsIndex());
+      let tm;
+      if (request.method === "GET" && (tm = p.match(/^\/tools\/([a-z0-9-]+)\/?$/))) {
+        const t = findTool(tm[1]);
+        return t ? html(toolPage(t)) : html(toolsIndex(), 404);
+      }
+      if (request.method === "POST" && p === "/api/tool") return await handleTool(request, env);
       let g;
       if (request.method === "GET" && (g = p.match(/^\/guides\/([a-z0-9-]+)\/?$/))) {
         const guide = findGuide(g[1]);
@@ -79,6 +87,7 @@ export default {
       if (request.method === "GET" && (m = p.match(/^\/checkout\/([a-f0-9-]{36})$/))) {
         if (!env.STRIPE_PAYMENT_LINK) return new Response("Payments are not set up yet.", { status: 503 });
         if (!(await load(env, m[1]))) return new Response("Report not found.", { status: 404 });
+        await bump(env, "checkout");
         const link = new URL(env.STRIPE_PAYMENT_LINK);
         link.searchParams.set("client_reference_id", m[1]);
         return Response.redirect(link.href, 303);
@@ -101,22 +110,39 @@ export default {
 async function load(env, id) { return env.SCANS.get("scan:" + id, "json"); }
 async function save(env, id, rec) { return env.SCANS.put("scan:" + id, JSON.stringify(rec), { expirationTtl: TTL }); }
 
-async function handleScan(request, env) {
-  let body; try { body = await request.json(); } catch { throw new UserError("Send a website address."); }
+async function createScan(request, env, rawUrl, statField) {
   const ip = request.headers.get("cf-connecting-ip") || "local";
   const hour = Math.floor(Date.now() / 3_600_000);
   const rlKey = `rl:${ip}:${hour}`;
   const used = Number((await env.SCANS.get(rlKey)) || 0);
-  if (used >= SCANS_PER_HOUR) return json({ error: "You've hit the limit of 10 scans an hour. Try again later." }, 429);
+  if (used >= SCANS_PER_HOUR) return { limited: true };
   await env.SCANS.put(rlKey, String(used + 1), { expirationTtl: 3700 });
-
-  const result = await runScan(body.url, { allowLocal: env.ALLOW_LOCAL === "1" });
+  const result = await runScan(rawUrl, { allowLocal: env.ALLOW_LOCAL === "1" });
   const id = crypto.randomUUID();
   const token = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
   const rec = { result, verifyToken: "pf-" + token, paid: false, verified: false };
   await save(env, id, rec);
-  await bump(env, "scans");
-  return json(view(rec, id, env));
+  await bump(env, statField);
+  return { id, rec };
+}
+const LIMITED = () => json({ error: "You've hit the limit of 10 checks an hour. Try again later." }, 429);
+
+async function handleScan(request, env) {
+  let body; try { body = await request.json(); } catch { throw new UserError("Send a website address."); }
+  const r = await createScan(request, env, body.url, "scans");
+  if (r.limited) return LIMITED();
+  return json(view(r.rec, r.id, env));
+}
+
+async function handleTool(request, env) {
+  let body; try { body = await request.json(); } catch { throw new UserError("Send a website address."); }
+  const tool = findTool(String(body.tool || ""));
+  if (!tool) return json({ error: "Unknown tool." }, 400);
+  const r = await createScan(request, env, body.url, "toolScans");
+  if (r.limited) return LIMITED();
+  const byId = Object.fromEntries(r.rec.result.checks.map((c) => [c.id, c]));
+  const checks = tool.checks.map((k) => byId[k]).filter(Boolean).map((c) => ({ id: c.id, title: c.title, pass: c.pass, severity: c.severity, detail: c.detail }));
+  return json({ id: r.id, url: r.rec.result.url, checks, preview: tool.showCard ? (byId.og && byId.og.value) || null : null });
 }
 
 async function handleVerify(env, id) {
@@ -167,12 +193,17 @@ export function view(rec, id, env = {}) {
   const { result, paid, verified } = rec;
   const visible = result.checks.filter((c) => verified || !c.sensitive);
   const score = scoreChecks(visible);
+  // Before paying, show the most important non-sensitive fix in full so people can judge the quality.
+  const W = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
+  const previewId = paid ? null : (visible.filter((c) => !c.pass && !c.sensitive).sort((a, b) => W[b.severity] - W[a.severity])[0] || {}).id;
   const checks = visible.map((c) => {
     const out = { id: c.id, category: c.category, title: c.title, pass: c.pass, severity: c.severity, detail: c.detail };
+    if (c.id === previewId) { out.fix = fixFor(c.id, result.stack); out.preview = true; }
     // Owners always see leaked secrets for free; the location of a leak is never shown to non-owners.
     if (c.sensitive && verified && c.findings) out.findings = c.findings;
     if (!c.sensitive && paid && c.findings) out.findings = c.findings;
     if (!c.pass && (paid || (c.sensitive && verified))) out.fix = fixFor(c.id, result.stack);
+    if (!c.pass && !out.fix) out.locked = true;
     return out;
   });
   return {
@@ -220,9 +251,10 @@ async function readStats(env) {
   for (let i = 0; i < 30; i++) {
     const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
     const v = (await env.SCANS.get("st:" + d, "json")) || {};
-    days.push({ date: d, scans: v.scans || 0, verified: v.verified || 0, shares: v.shares || 0, paid: v.paid || 0 });
+    days.push({ date: d, scans: v.scans || 0, toolScans: v.toolScans || 0, verified: v.verified || 0, shares: v.shares || 0, checkout: v.checkout || 0, paid: v.paid || 0 });
   }
   const sum = (k, n) => days.slice(0, n).reduce((a, d) => a + d[k], 0);
-  return { last7: { scans: sum("scans", 7), verified: sum("verified", 7), shares: sum("shares", 7), paid: sum("paid", 7) },
-    last30: { scans: sum("scans", 30), verified: sum("verified", 30), shares: sum("shares", 30), paid: sum("paid", 30) }, days };
+  const keys = ["scans", "toolScans", "verified", "shares", "checkout", "paid"];
+  const tot = (n) => Object.fromEntries(keys.map((k) => [k, sum(k, n)]));
+  return { last7: tot(7), last30: tot(30), days };
 }

@@ -1,5 +1,6 @@
 // Server-rendered secondary pages: guides, share cards, badge.
 import { GUIDES } from "./guides.js";
+const TOOL_SLUGS = ["link-preview-checker", "security-headers-checker", "seo-checker"];
 
 export const SITE = "https://prelaunchcheck.dev";
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -58,9 +59,9 @@ export function shell({ title, description, path, body, image = "/og.png", type 
 <style>${CSS}</style>
 ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld).replace(/</g, "\\u003c")}</script>` : ""}
 </head><body><div class="wrap">
-<nav><a class="brand" href="/"><i></i>Prelaunch Check</a><div class="links"><a href="/guides">Guides</a><a href="/">Free scan</a></div></nav>
+<nav><a class="brand" href="/"><i></i>Prelaunch Check</a><div class="links"><a href="/guides">Guides</a><a href="/tools">Free tools</a><a href="/">Full check</a></div></nav>
 ${body}
-<footer>Prelaunch Check tests your live site for leaked keys, link previews, SEO and security headers. · <a href="/guides">Guides</a> · <a href="/refunds">Refunds</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></footer>
+<footer>Prelaunch Check tests your live site for leaked keys, link previews, SEO and security headers. · <a href="/guides">Guides</a> · <a href="/tools">Free tools</a> · <a href="/refunds">Refunds</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></footer>
 </div></body></html>`;
 }
 
@@ -119,6 +120,6 @@ export function badgeSvg(pub) {
 }
 
 export function sitemapXml() {
-  const urls = ["/", "/guides", ...GUIDES.map((g) => `/guides/${g.slug}`), "/terms", "/privacy", "/refunds"];
+  const urls = ["/", "/tools", ...TOOL_SLUGS.map((t) => `/tools/${t}`), "/guides", ...GUIDES.map((g) => `/guides/${g.slug}`), "/terms", "/privacy", "/refunds"];
   return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map((u) => `<url><loc>${SITE}${u}</loc></url>`).join("")}</urlset>`;
 }

@@ -63,6 +63,10 @@ button[disabled]{opacity:.6;cursor:wait}
 .sev{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:4px;white-space:nowrap}
 .sev.critical,.sev.high{background:var(--bad-bg);color:var(--bad)} .sev.medium{background:var(--warn-bg);color:var(--warn)} .sev.low,.sev.info{background:var(--bg);color:var(--muted)}
 .fix{grid-column:2/4;background:var(--bg);border-radius:8px;padding:12px 14px;font-size:14px}
+.tag-free{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ok);margin:0 0 6px!important}
+.locked-fix{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.locked-fix .blur{filter:blur(4px);user-select:none;color:var(--muted)}
+.lock-label{font:500 12px var(--mono);color:var(--signal)}
 .fix ol{margin:6px 0 0;padding-left:20px;white-space:pre-line} .fix p{margin:0}
 .fix .tip{margin-top:8px;font-weight:600}
 .find{grid-column:2/4;font:500 13px var(--mono);overflow-wrap:anywhere;color:var(--bad)}
@@ -81,7 +85,7 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
 <body>
 <div class="wrap">
   <header style="display:flex;flex-direction:column;gap:18px">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div class="brand"><i></i>Prelaunch Check</div><a href="/guides" style="font-size:15px">Launch guides</a></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div class="brand"><i></i>Prelaunch Check</div><span style="display:flex;gap:16px;font-size:15px"><a href="/tools">Free tools</a><a href="/guides">Launch guides</a></span></div>
     <h1>Check your site <em>before</em> you ship it.</h1>
     <p class="lede">Built something with AI? Paste the address and get a launch checklist in about ten seconds: leaked API keys, missing link previews, broken links, security headers and bundle size.</p>
     <form id="scanForm">
@@ -93,7 +97,7 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
     <p id="error" class="err" hidden></p>
   </header>
   <main id="report" aria-live="polite"></main>
-  <footer>Prelaunch Check only reads what any visitor's browser can see. Leaked-key details are shown only to the site's verified owner, and we never charge to tell you a key is exposed.<br>Questions or refunds: __CONTACT__ · <a href="/refunds">Refunds</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></footer>
+  <footer>Prelaunch Check only reads what any visitor's browser can see. Leaked-key details are shown only to the site's verified owner, and we never charge to tell you a key is exposed.<br>Questions or refunds: __CONTACT__ · <a href="/tools">Free tools</a> · <a href="/guides">Guides</a> · <a href="/refunds">Refunds</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></footer>
 </div>
 <script>
 (function(){
@@ -147,7 +151,8 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
         var mid=el('div');mid.appendChild(el('div','t',c.title));mid.appendChild(el('div','d',c.detail||''));li.appendChild(mid);
         li.appendChild(c.pass?el('span'):el('span','sev '+c.severity,c.severity));
         (c.findings||[]).forEach(function(f){li.appendChild(el('div','find',f.masked?(f.name+": "+f.masked+" in "+f.where):(f.url+" → "+f.status)))});
-        if(c.fix){var fx=el('div','fix');fx.appendChild(el('p',null,c.fix.why));var ol=el('ol');c.fix.steps.forEach(function(st){ol.appendChild(el('li',null,st))});fx.appendChild(ol);(c.fix.tips||[]).forEach(function(t){fx.appendChild(el('p','tip',t.stack+": "+t.tip))});li.appendChild(fx)}
+        if(c.fix){var fx=el('div','fix');if(c.preview)fx.appendChild(el('p','tag-free',"Free preview of the full report"));fx.appendChild(el('p',null,c.fix.why));var ol=el('ol');c.fix.steps.forEach(function(st){ol.appendChild(el('li',null,st))});fx.appendChild(ol);(c.fix.tips||[]).forEach(function(t){fx.appendChild(el('p','tip',t.stack+": "+t.tip))});li.appendChild(fx)}
+        else if(c.locked&&!d.paid){var lk=el('div','fix locked-fix');lk.appendChild(el('span','blur',"Why it matters, then step-by-step fix instructions for your setup."));lk.appendChild(el('span','lock-label',"Fix included in the full report"));li.appendChild(lk)}
         ul.appendChild(li);
       });
       sec.appendChild(ul);wrapAll.appendChild(sec);
@@ -182,7 +187,8 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
   function lockPanel(d,n){
     var p=el('section','panel locked');
     p.appendChild(el('h3',null,"Get the fix for all "+n+" issue"+(n>1?"s":"")));
-    p.appendChild(el('p',null,"Step-by-step fixes written for your stack, the list of every broken link, and a report you can re-open for 30 days. One payment of "+PRICE+", no subscription."));
+    p.appendChild(el('p',null,"You've seen one fix free below. The full report adds step-by-step fixes for every issue, written for "+(d.stack.length?d.stack.join(" + "):"your setup")+", plus every broken link. One payment of "+PRICE+", no subscription, re-open it for 30 days."));
+    p.appendChild(el('p','note',"Not useful? Email hello@prelaunchcheck.dev within 14 days for a full refund."));
     if(d.devUnlock){var b=el('button','primary',"Unlock (test mode)");b.type='button';b.onclick=async function(){var r=await api('/api/dev-unlock/'+d.id,{method:'POST'});if(r.ok)render(r.data)};p.appendChild(b)}
     else if(d.checkoutReady){var a=el('a','btn primary',"Unlock fixes for "+PRICE);a.href='/checkout/'+d.id;p.appendChild(a)}
     else p.appendChild(el('p','note',"Paid reports are coming soon."));
