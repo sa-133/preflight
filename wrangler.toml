@@ -10,5 +10,5 @@ id = "e96b23c43bc144a3a5df2e416e83047f"
 [vars]
 PRICE_LABEL = "$7"
 # Your Stripe Payment Link, e.g. https://buy.stripe.com/xxxx
-STRIPE_PAYMENT_LINK = ""
+STRIPE_PAYMENT_LINK = "https://buy.stripe.com/eVq28t2w2eaG9RjdUB5wI00"
 # STRIPE_SECRET_KEY is a secret: set it in the Cloudflare dashboard, never here.
