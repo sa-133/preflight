@@ -5,6 +5,56 @@
 
 export const GUIDES = [
 {
+  slug: "is-nuxt-runtime-config-public",
+  title: "Is Nuxt runtimeConfig public? Keeping API keys out of the browser",
+  description: "Anything under runtimeConfig.public in Nuxt is sent to every visitor. Here's where secret keys belong and how to call an API from a server route.",
+  date: "2026-10-20",
+  tags: ["nuxt","env","keys"],
+  html: `
+<p><b>Only part of it.</b> Keys you put directly under <code>runtimeConfig</code> in <code>nuxt.config</code> stay on the server. Keys under <code>runtimeConfig.public</code> are exposed to the client and can appear in the page payload. An API key in the <code>public</code> block is public.</p>
+<h2>How the two blocks work</h2>
+<pre><code>// nuxt.config.ts
+export default defineNuxtConfig({
+  runtimeConfig: {
+    openaiApiKey: "",      // server only; set with NUXT_OPENAI_API_KEY
+    public: {
+      apiBase: "/api",     // exposed to the client; set with NUXT_PUBLIC_API_BASE
+    },
+  },
+});</code></pre>
+<p>Nuxt can override declared runtime config keys with matching environment variables. Private runtime config uses the <code>NUXT_</code> prefix; public config uses <code>NUXT_PUBLIC_</code>. Declaring a key does not make every environment variable public: only values placed in <code>runtimeConfig.public</code> are exposed to the client.</p>
+<h2>Why keys still end up in public config</h2>
+<ul>
+<li>The browser code needed the key, so it was moved into <code>public</code> to make an error go away.</li>
+<li>A server-only value was read on the server and then passed to the page, for example through <code>useState</code> or rendered HTML.</li>
+<li>The provider is called from a component instead of a server route. See <a href="/guides/never-call-ai-apis-from-the-browser">why that exposes the key</a>.</li>
+</ul>
+<h2>Call the provider from a server route</h2>
+<p>Keep the key in the private runtime config and make the call from <code>server/api</code>:</p>
+<pre><code>// server/api/chat.post.ts
+export default defineEventHandler(async (event) =&gt; {
+  const { openaiApiKey } = useRuntimeConfig(event);
+  const { message } = await readBody(event);
+  return await $fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + openaiApiKey },
+    body: {
+      model: "YOUR_MODEL",
+      messages: [{ role: "user", content: message }],
+    },
+  });
+});</code></pre>
+<p>Your client calls <code>/api/chat</code> and never receives the key. Passing <code>event</code> to <code>useRuntimeConfig</code> ensures the server route reads the runtime value for that request.</p>
+<h2>Set the variable on your host</h2>
+<p>Nuxt's CLI reads <code>.env</code> during development and build commands, but the built server does not read that file at runtime. Set <code>NUXT_OPENAI_API_KEY</code> in your hosting platform's environment settings and redeploy or restart as that platform requires.</p>
+<h2>Check your live site</h2>
+<ol>
+<li>Open your site, view the page source, and search for your key's prefix and names from the <code>public</code> block.</li>
+<li>If a secret appears, rotate it first. Moving it does not un-leak it. Follow <a href="/guides/what-to-do-if-your-api-key-leaked">these steps for a leaked API key</a>.</li>
+<li>Add authentication or rate limits to your server route, and set a spending limit with the provider.</li>
+</ol>`,
+},
+{
   slug: "launch-checklist-for-ai-built-apps",
   title: "The launch checklist for AI-built apps",
   description: "Built your app with Cursor, Lovable, Bolt or Claude? Check these 12 things before you share the link: keys, env files, previews, SEO and headers.",
